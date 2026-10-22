@@ -1,0 +1,13 @@
+{
+  "framework": null,
+  "installCommand": "cd frontend && npm install",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/dist",
+  "rewrites": [
+    { "source": "/chat", "destination": "/api/index" },
+    { "source": "/api/status", "destination": "/api/index" }
+  ],
+  "functions": {
+    "api/index.py": { "excludeFiles": "{frontend/**,tutor4.py}" }
+  }
+}
