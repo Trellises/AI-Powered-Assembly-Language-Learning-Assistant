@@ -145,6 +145,43 @@ if api_key:
     client = genai.Client(api_key=api_key)
 
 
+# Models to try, in order. Gemma goes first because its free-tier
+# limits are higher; Gemini is the fallback. Override with the
+# AI_MODELS environment variable (comma-separated) to change the
+# order or model names without editing code.
+AI_MODELS = [
+    model.strip()
+    for model in os.getenv(
+        "AI_MODELS",
+        "gemma-4-31b-it,gemini-3.5-flash"
+    ).split(",")
+    if model.strip()
+]
+
+
+def ask_model(model, message):
+
+    # Gemma may not accept a system instruction, so the tutor rules
+    # are sent as part of the message instead.
+    if model.startswith("gemma"):
+        return client.models.generate_content(
+            model=model,
+            contents=f"{SYSTEM_INSTRUCTIONS}\n\nStudent question:\n{message}",
+            config=types.GenerateContentConfig(
+                temperature=0.3
+            )
+        )
+
+    return client.models.generate_content(
+        model=model,
+        contents=message,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTIONS,
+            temperature=0.3
+        )
+    )
+
+
 # ============================================================
 # REQUEST MODEL
 # ============================================================
@@ -173,35 +210,32 @@ def chat(request: ChatRequest):
             detail="GEMINI_API_KEY is not set."
         )
 
-    try:
+    last_error = "The AI returned an empty response."
 
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=request.message,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTIONS,
-                temperature=0.3
-            )
-        )
+    # Try each model in order. If one fails (rate limit, bad model
+    # name, outage) or returns nothing, move on to the next one.
+    for model in AI_MODELS:
 
-        if not response.text:
-            raise HTTPException(
-                status_code=500,
-                detail="Gemini returned an empty response."
-            )
+        try:
 
-        return {
-            "answer": response.text
-        }
+            response = ask_model(model, request.message)
 
-    except HTTPException:
-        raise
+            if response.text:
+                return {
+                    "answer": response.text,
+                    "model": model
+                }
 
-    except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)
-        )
+            last_error = f"{model} returned an empty response."
+
+        except Exception as error:
+            print(f"Model {model} failed: {error}")
+            last_error = str(error)
+
+    raise HTTPException(
+        status_code=500,
+        detail=last_error
+    )
 
 
 # ============================================================
